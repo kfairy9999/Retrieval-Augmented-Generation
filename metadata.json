@@ -1,0 +1,5 @@
+{
+  "name": "Personal Knowledge Engine",
+  "description": "A client-side RAG application capable of ingesting documents, generating embeddings, and answering queries with source citations using Gemini.",
+  "requestFramePermissions": []
+}
