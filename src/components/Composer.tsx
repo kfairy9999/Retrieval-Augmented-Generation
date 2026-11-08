@@ -39,7 +39,7 @@ export function Composer({ value, disabled, hasConversation, hint, onChange, onS
           type="submit"
           disabled={disabled || value.trim().length === 0}
           aria-label="Send question"
-          className="mb-1 flex h-11 w-11 items-center justify-center rounded-full bg-[#8c3a24] text-white transition hover:bg-[#732f1d] disabled:cursor-not-allowed disabled:opacity-40"
+          className="mb-1 flex h-11 w-11 items-center justify-center rounded-full bg-[#8c3a24] text-white transition hover:bg-[#732f1d] disabled:cursor-not-allowed disabled:bg-[#e7d3c4] disabled:text-[#6b4032]"
         >
           <Send className="h-4 w-4" />
         </button>

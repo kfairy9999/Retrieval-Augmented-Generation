@@ -133,6 +133,21 @@ export function Sidebar({
                         <StatusIcon status={doc.status} />
                         <span>{labelFor(doc)}</span>
                       </div>
+                      {(doc.status === DocStatus.EMBEDDING || doc.status === DocStatus.PROCESSING || doc.status === DocStatus.UPLOADING) && (
+                        <div
+                          className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#f0e4d8]"
+                          role="progressbar"
+                          aria-valuenow={Math.round(doc.progress * 100)}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-label={`Indexing ${doc.name}`}
+                        >
+                          <div
+                            className="h-full rounded-full bg-[#8c3a24] transition-[width] duration-300 motion-reduce:transition-none"
+                            style={{ width: `${doc.status === DocStatus.EMBEDDING ? Math.max(8, Math.round(doc.progress * 100)) : 18}%` }}
+                          />
+                        </div>
+                      )}
                       {doc.error && <p className="mt-2 text-sm leading-6 text-[#7a1f36]">{doc.error}</p>}
                       {doc.status === DocStatus.INDEXED && (
                         <p className="mt-2 text-sm text-[#4e433c]">

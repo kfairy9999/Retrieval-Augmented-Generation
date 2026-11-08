@@ -79,6 +79,9 @@ export function MessageList({ messages, onCite, onShowContext }: MessageListProp
               )}
               {message.role === "user" && <p className="whitespace-pre-wrap">{message.content}</p>}
               {message.error && <p className="mt-2 text-sm leading-6 text-[#7a1f36]">{message.error}</p>}
+              {message.status === "done" && (
+                <p className="mt-3 text-sm font-medium text-[#145c38]" role="status">Ready to check the passages.</p>
+              )}
             </div>
             {message.role === "model" && message.sources && message.sources.length > 0 && (
               <button

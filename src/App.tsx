@@ -43,6 +43,16 @@ export default function App() {
       .catch(() => setApiDown(true));
   }, []);
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setSidebarOpen(false);
+      setContextOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const keyState: KeyState = apiDown ? "down" : !health ? "checking" : health.hasKey ? "ready" : "missing";
   const focused = messages.find((message) => message.id === focusedId) ?? null;
 
@@ -219,6 +229,12 @@ export default function App() {
 
   return (
     <div className="flex h-dvh overflow-hidden text-[#2a211c]">
+      <a
+        href="#question"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-full focus:bg-[#8c3a24] focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white"
+      >
+        Skip to the question
+      </a>
       {sidebarOpen && (
         <button
           type="button"

@@ -12,7 +12,7 @@ The vector index stays in the browser tab. The Gemini API key stays on the serve
 ![Gemini](https://img.shields.io/badge/Gemini_API-8E75B2?logo=googlegemini&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
-![Warm empty state inviting the first upload. The pill says to add a server key because this session has none.](docs/screenshot.png)
+![Welcome screen asking what you want to ask your documents. The pill says to add a server key because this session has none.](docs/screenshot.png)
 
 The header pill still comes from `/api/health`. It does not mean the browser was given a key.
 

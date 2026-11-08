@@ -29,12 +29,12 @@ export function EmptyState({ onUpload }: EmptyStateProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-6 sm:px-8">
       <div className="mx-auto my-auto w-full max-w-3xl">
-      <p className="text-sm font-medium text-[#8c3a24]">Your reading desk</p>
+      <p className="text-sm font-semibold text-[#8c3a24]">Welcome</p>
       <h2 className="font-serif mt-2 max-w-xl text-4xl leading-tight text-[#2a211c] sm:text-5xl">
-        Start with one document you already trust.
+        What do you want to ask your documents?
       </h2>
       <p className="mt-4 max-w-xl text-base leading-7 text-[#4e433c]">
-        Upload something you want to ask questions about. I’ll answer from those pages and keep the matching passages beside the reply.
+        Add a file you already trust. I’ll keep the passages in this tab and show them beside the answer, so you can check my work.
       </p>
       <div className="mt-6">
         <input
