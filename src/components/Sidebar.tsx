@@ -2,8 +2,8 @@ import { useRef } from "react";
 import {
   AlertCircle,
   CheckCircle2,
-  Database,
   FileUp,
+  Library,
   Loader2,
   Square,
   SquareCheck,
@@ -36,27 +36,28 @@ export function Sidebar({
 }: SidebarProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const allSelected = documents.length > 0 && selectedDocIds.length === documents.length;
+  const ready = documents.filter((doc) => doc.status === DocStatus.INDEXED).map((doc) => doc.name);
 
   return (
-    <aside className="flex h-full w-80 flex-col border-r border-slate-800 bg-[#0c1222]">
-      <div className="border-b border-slate-800 px-5 py-5">
-        <div className="flex items-center gap-2">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-300">
-            <Database className="h-5 w-5" aria-hidden="true" />
+    <aside className="flex h-full w-[min(100vw,20.5rem)] flex-col border-r border-[#eadfd4] bg-[#fffdfb] shadow-xl md:shadow-none">
+      <div className="border-b border-[#eadfd4] px-5 py-5">
+        <div className="flex items-center gap-3">
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#f6e7dc] text-[#8c3a24]">
+            <Library className="h-5 w-5" aria-hidden="true" />
           </span>
           <div>
-            <h1 className="text-sm font-semibold text-white">Knowledge Engine</h1>
-            <p className="text-xs text-slate-400">Personal document RAG</p>
+            <h1 className="font-serif text-xl leading-none text-[#2a211c]">Your library</h1>
+            <p className="mt-1 text-sm text-[#4e433c]">Kept in this browser tab</p>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
+      <div className="flex-1 space-y-6 overflow-y-auto px-4 py-5">
         <div>
           <input
             ref={inputRef}
             type="file"
-            className="hidden"
+            className="sr-only"
             multiple
             accept=".txt,.md,.markdown,.json,.pdf,text/plain,text/markdown,application/json,application/pdf"
             onChange={(event) => {
@@ -67,49 +68,54 @@ export function Sidebar({
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-500 px-3 py-2.5 text-sm font-medium text-white transition hover:bg-indigo-400"
+            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-[#8c3a24] px-3 text-sm font-semibold text-white transition hover:bg-[#732f1d]"
           >
             <FileUp className="h-4 w-4" aria-hidden="true" />
-            Upload documents
+            Add a document
           </button>
-          <p className="mt-2 text-center text-[11px] text-slate-500">PDF, Markdown, text, or JSON · 2 MB each</p>
+          <p className="mt-2 text-center text-sm text-[#4e433c]">PDF, Markdown, text, or JSON · 2 MB</p>
           {documents.length > 0 && (
             <button
               type="button"
               onClick={onToggleAll}
-              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+              className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-full px-2 text-sm font-medium text-[#4e433c] hover:bg-[#f6eee7]"
             >
-              {allSelected ? <SquareCheck className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+              {allSelected ? <SquareCheck className="h-4 w-4" /> : <Square className="h-4 w-4" />}
               {allSelected ? "Deselect all" : "Select all"}
             </button>
           )}
         </div>
 
         {notice && (
-          <div className="flex gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
+          <div className="flex gap-2 rounded-2xl border border-[#e7c7a4] bg-[#fff6ea] px-3 py-3 text-sm leading-6 text-[#5c3b16]">
             <p className="flex-1">{notice}</p>
-            <button type="button" aria-label="Dismiss notice" onClick={onDismissNotice} className="text-amber-200">
-              <X className="h-3.5 w-3.5" />
+            <button type="button" aria-label="Dismiss notice" onClick={onDismissNotice} className="mt-0.5 min-h-11 min-w-11 text-[#5c3b16]">
+              <X className="mx-auto h-4 w-4" />
             </button>
           </div>
         )}
 
         <div>
-          <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-            Documents {selectedDocIds.length}/{documents.length}
+          <h2 className="mb-3 text-sm font-semibold text-[#4e433c]">
+            Documents · {selectedDocIds.length} of {documents.length} selected
           </h2>
+          <p className="sr-only" aria-live="polite">
+            {ready.length > 0 ? `${ready.join(", ")} ${ready.length === 1 ? "is" : "are"} ready to search.` : ""}
+          </p>
           {documents.length === 0 && (
-            <div className="rounded-xl border border-dashed border-slate-700 px-3 py-8 text-center text-sm text-slate-500">
-              Nothing indexed yet.
+            <div className="rounded-3xl border border-dashed border-[#ddcfc2] px-4 py-8 text-center text-sm leading-6 text-[#4e433c]">
+              Nothing here yet. Add a file when you’re ready.
             </div>
           )}
-          <ul className="space-y-2">
+          <ul className="space-y-3">
             {documents.map((doc) => {
               const selected = selectedDocIds.includes(doc.id);
               return (
                 <li
                   key={doc.id}
-                  className={`rounded-xl border px-3 py-3 ${selected ? "border-indigo-400/40 bg-indigo-500/10" : "border-slate-800 bg-slate-900/40"}`}
+                  className={`rounded-3xl border px-3 py-3 transition ${
+                    doc.status === DocStatus.INDEXED ? "doc-ready" : ""
+                  } ${selected ? "border-[#e7cbb8] bg-[#fbf3ec]" : "border-[#eadfd4] bg-white"}`}
                 >
                   <div className="flex items-start gap-2">
                     <button
@@ -117,20 +123,20 @@ export function Sidebar({
                       aria-pressed={selected}
                       aria-label={`${selected ? "Deselect" : "Select"} ${doc.name}`}
                       onClick={() => onToggleDoc(doc.id)}
-                      className="mt-0.5 text-slate-400"
+                      className="mt-0.5 min-h-11 min-w-11 text-[#5c514a]"
                     >
-                      {selected ? <SquareCheck className="h-4 w-4 text-indigo-300" /> : <Square className="h-4 w-4" />}
+                      {selected ? <SquareCheck className="mx-auto h-5 w-5 text-[#8c3a24]" /> : <Square className="mx-auto h-5 w-5" />}
                     </button>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm text-slate-100" title={doc.name}>{doc.name}</p>
-                      <div className="mt-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    <div className="min-w-0 flex-1 py-2">
+                      <p className="truncate text-sm font-semibold text-[#2a211c]" title={doc.name}>{doc.name}</p>
+                      <div className="mt-1 flex items-center gap-1.5 text-sm text-[#4e433c]">
                         <StatusIcon status={doc.status} />
                         <span>{labelFor(doc)}</span>
                       </div>
-                      {doc.error && <p className="mt-1 text-xs leading-5 text-rose-300">{doc.error}</p>}
+                      {doc.error && <p className="mt-2 text-sm leading-6 text-[#7a1f36]">{doc.error}</p>}
                       {doc.status === DocStatus.INDEXED && (
-                        <p className="mt-2 text-[11px] text-slate-500">
-                          {(doc.size / 1024).toFixed(1)} KB · {doc.chunkCount} chunks
+                        <p className="mt-2 text-sm text-[#4e433c]">
+                          {(doc.size / 1024).toFixed(1)} KB · {doc.chunkCount} passages
                           {doc.truncated ? " · first 80 only" : ""}
                         </p>
                       )}
@@ -139,9 +145,9 @@ export function Sidebar({
                       type="button"
                       aria-label={`Remove ${doc.name}`}
                       onClick={() => onRemove(doc.id)}
-                      className="text-slate-500 hover:text-rose-300"
+                      className="min-h-11 min-w-11 text-[#5c514a] hover:text-[#7a1f36]"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="mx-auto h-4 w-4" />
                     </button>
                   </div>
                 </li>
@@ -151,27 +157,27 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className="border-t border-slate-800 px-4 py-3 font-mono text-[11px] leading-5 text-slate-400">
-        <p>embed {EMBEDDING_MODEL}</p>
-        <p>answer {CHAT_MODEL}</p>
-        <p>index lives in this tab</p>
+      <div className="border-t border-[#eadfd4] px-5 py-4 text-sm leading-6 text-[#4e433c]">
+        <p>Embeddings · {EMBEDDING_MODEL}</p>
+        <p>Answers · {CHAT_MODEL}</p>
       </div>
     </aside>
   );
 }
 
 function labelFor(doc: UploadedDocument): string {
-  if (doc.status === DocStatus.EMBEDDING) return `Embedding ${Math.round(doc.progress * 100)}%`;
-  if (doc.status === DocStatus.PROCESSING) return "Chunking";
-  if (doc.status === DocStatus.UPLOADING) return "Reading";
-  return doc.status.toLowerCase();
+  if (doc.status === DocStatus.EMBEDDING) return `Reading the meaning · ${Math.round(doc.progress * 100)}%`;
+  if (doc.status === DocStatus.PROCESSING) return "Splitting into passages";
+  if (doc.status === DocStatus.UPLOADING) return "Opening the file";
+  if (doc.status === DocStatus.INDEXED) return "Ready to search";
+  return "Needs another try";
 }
 
 function StatusIcon({ status }: { status: UploadedDocument["status"] }) {
-  if (status === DocStatus.INDEXED) return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />;
-  if (status === DocStatus.ERROR) return <AlertCircle className="h-3.5 w-3.5 text-rose-400" />;
+  if (status === DocStatus.INDEXED) return <CheckCircle2 className="h-4 w-4 text-[#1b5e3b]" aria-hidden="true" />;
+  if (status === DocStatus.ERROR) return <AlertCircle className="h-4 w-4 text-[#7a1f36]" aria-hidden="true" />;
   if (status === DocStatus.EMBEDDING || status === DocStatus.PROCESSING || status === DocStatus.UPLOADING) {
-    return <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-300" />;
+    return <Loader2 className="h-4 w-4 animate-spin text-[#8c3a24]" aria-hidden="true" />;
   }
   return null;
 }
