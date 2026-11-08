@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "personal-knowledge-engine",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "upload_source_maps": true,
+  // API routes run in the Worker. Everything else is the Vite build.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      // Low-traffic demo. Raise this if you need a trace for every request.
+      "head_sampling_rate": 0.01
+    }
+  },
+  // Set the value with `npx wrangler secret put GEMINI_API_KEY`. Do not put it here.
+  "secrets": {
+    "required": ["GEMINI_API_KEY"]
+  }
+}

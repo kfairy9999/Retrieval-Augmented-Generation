@@ -10,6 +10,16 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+coverage
+.wrangler
+worker-configuration.d.ts
+
+# Secrets. Keep the examples.
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
 *.local
 
 # Editor directories and files
