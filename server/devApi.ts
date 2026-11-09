@@ -61,17 +61,17 @@ async function writeResponse(res: ServerResponse, response: Response): Promise<v
   res.end();
 }
 
-export function apiDevPlugin(apiKey: string): Plugin {
+export function apiDevPlugin(keys: { geminiApiKey: string; xaiApiKey: string }): Plugin {
   return {
-    name: "local-gemini-api",
+    name: "local-model-api",
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        void serve(req, res, next, apiKey);
+        void serve(req, res, next, keys);
       });
     },
     configurePreviewServer(server) {
       server.middlewares.use((req, res, next) => {
-        void serve(req, res, next, apiKey);
+        void serve(req, res, next, keys);
       });
     },
   };
@@ -81,7 +81,7 @@ async function serve(
   req: IncomingMessage,
   res: ServerResponse,
   next: (error?: unknown) => void,
-  apiKey: string,
+  keys: { geminiApiKey: string; xaiApiKey: string },
 ): Promise<void> {
   const path = req.url ?? "";
   if (!path.startsWith("/api/")) {
@@ -94,7 +94,7 @@ async function serve(
     const request = await toWebRequest(req, `http://${host}${path}`);
     const response = request instanceof Response
       ? request
-      : await handleApi(request, { GEMINI_API_KEY: apiKey });
+      : await handleApi(request, { GEMINI_API_KEY: keys.geminiApiKey, XAI_API_KEY: keys.xaiApiKey });
     await writeResponse(res, response);
   } catch (error) {
     console.error(JSON.stringify({

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { formatDocument, formatQuery } from "../shared/embeddingText";
 import { linkCitations } from "../shared/citations";
 import { deltasFromGeminiEvent, takeSseEvents } from "../shared/sse";
-import { proxyGeminiStream } from "../server/gemini";
+import { deltasFromGrokEvent, proxyGrokStream, textFromGrokResponse } from "../server/grok";
 import { handleApi, type Limiters } from "../server/handler";
 import { buildAnswerRequest, standaloneQuery } from "../server/prompt";
 import { SlidingWindowLimiter } from "../server/rateLimit";
@@ -82,16 +82,28 @@ describe("prompts and SSE", () => {
     expect(partial.rest).toContain("data:");
   });
 
-  it("proxies a Gemini stream into answer deltas", async () => {
+  it("keeps Grok answer deltas and drops reasoning deltas", () => {
+    expect(deltasFromGrokEvent(JSON.stringify({ type: "response.reasoning_text.delta", delta: "secret" })).deltas).toEqual([]);
+    expect(deltasFromGrokEvent(JSON.stringify({ type: "response.output_text.delta", delta: "Hi" })).deltas).toEqual(["Hi"]);
+    expect(textFromGrokResponse({
+      output: [
+        { type: "reasoning" },
+        { type: "message", content: [{ type: "output_text", text: "plant energy" }] },
+      ],
+    })).toBe("plant energy");
+  });
+
+  it("proxies a Grok stream into answer deltas", async () => {
     const encoder = new TextEncoder();
     const upstream = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(encoder.encode('data: {"candidates":[{"content":{"parts":[{"thought":true,"text":"secret"},{"text":"Hi"}]}}]}\n\n'));
-        controller.enqueue(encoder.encode('data: {"candidates":[{"content":{"parts":[{"text":" there"}]}}]}\n\n'));
+        controller.enqueue(encoder.encode('data: {"type":"response.reasoning_text.delta","delta":"secret"}\n\n'));
+        controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"Hi"}\n\n'));
+        controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":" there"}\n\n'));
         controller.close();
       },
     });
-    const text = await new Response(proxyGeminiStream(upstream)).text();
+    const text = await new Response(proxyGrokStream(upstream)).text();
     expect(text).toContain('{"delta":"Hi"}');
     expect(text).toContain('{"delta":" there"}');
     expect(text).toContain('{"done":true}');
@@ -100,10 +112,16 @@ describe("prompts and SSE", () => {
 });
 
 describe("HTTP API", () => {
-  it("reports whether a key is configured", async () => {
-    const response = await handleApi(new Request("http://local/api/health"), { GEMINI_API_KEY: "" });
+  it("reports whether each server key is configured", async () => {
+    const response = await handleApi(new Request("http://local/api/health"), { GEMINI_API_KEY: "embed", XAI_API_KEY: "" });
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ ok: true, hasKey: false });
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      hasEmbeddingKey: true,
+      hasChatKey: false,
+      chatModel: "grok-4.7",
+      embeddingModel: "gemini-embedding-2",
+    });
   });
 
   it("rejects unknown routes, methods, and non-JSON bodies", async () => {
@@ -159,29 +177,63 @@ describe("HTTP API", () => {
   });
 
   it("returns the question unchanged when there is no history", async () => {
-    const response = await handleApi(post("/api/rewrite", { question: "What is RAG?", history: [] }), { GEMINI_API_KEY: "k" }, {
+    const response = await handleApi(post("/api/rewrite", { question: "What is RAG?", history: [] }), {}, {
       limiters: limiters(),
-      fetchImpl: () => Promise.reject(new Error("should not call Gemini")),
+      fetchImpl: () => Promise.reject(new Error("should not call a model")),
     });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ query: "What is RAG?" });
   });
 
-  it("streams an answer and skips model thoughts", async () => {
+  it("asks Grok to rewrite a follow-up and does not put the key in the URL", async () => {
+    let called = "";
+    const response = await handleApi(post("/api/rewrite", {
+      question: "what about the second one?",
+      history: [{ role: "user", content: "Tell me about photosynthesis." }],
+    }), { XAI_API_KEY: "xai-secret" }, {
+      limiters: limiters(),
+      fetchImpl: async (input, init) => {
+        called = String(input);
+        const headers = new Headers(init?.headers);
+        expect(headers.get("authorization")).toBe("Bearer xai-secret");
+        const payload = JSON.parse(String(init?.body)) as { model: string; store: boolean; reasoning: { effort: string }; stream: boolean };
+        expect(payload.model).toBe("grok-4.7");
+        expect(payload.store).toBe(false);
+        expect(payload.reasoning.effort).toBe("low");
+        expect(payload.stream).toBe(false);
+        return new Response(JSON.stringify({ output_text: "photosynthesis energy storage" }), { status: 200 });
+      },
+    });
+    expect(called).toBe("https://api.x.ai/v1/responses");
+    expect(called).not.toContain("xai-secret");
+    await expect(response.json()).resolves.toEqual({ query: "photosynthesis energy storage" });
+  });
+
+  it("streams a Grok answer and skips reasoning deltas", async () => {
     const encoder = new TextEncoder();
     const response = await handleApi(post("/api/generate", {
       question: "What color is the door?",
       history: [{ role: "user", content: "Look at the notes." }],
       chunks: [{ content: "The door is red.", source: "house.md" }],
-    }), { GEMINI_API_KEY: "k" }, {
+    }), { XAI_API_KEY: "xai-secret" }, {
       limiters: limiters(),
-      fetchImpl: (_input, init) => {
-        const payload = JSON.parse(String(init?.body)) as { systemInstruction: { parts: Array<{ text: string }> }; contents: Array<{ role: string }> };
-        expect(payload.systemInstruction.parts[0]?.text).toMatch(/untrusted/i);
-        expect(payload.contents.at(-1)?.role).toBe("user");
+      fetchImpl: (input, init) => {
+        expect(String(input)).toBe("https://api.x.ai/v1/responses");
+        const payload = JSON.parse(String(init?.body)) as {
+          model: string;
+          stream: boolean;
+          store: boolean;
+          input: Array<{ role: string; content: string }>;
+        };
+        expect(payload.model).toBe("grok-4.7");
+        expect(payload.stream).toBe(true);
+        expect(payload.store).toBe(false);
+        expect(payload.input[0]?.content).toMatch(/untrusted/i);
+        expect(payload.input.at(-1)?.role).toBe("user");
         return Promise.resolve(new Response(new ReadableStream({
           start(controller) {
-            controller.enqueue(encoder.encode('data: {"candidates":[{"content":{"parts":[{"thought":true,"text":"plan"},{"text":"It is red [1]."}]}}]}\n\n'));
+            controller.enqueue(encoder.encode('data: {"type":"response.reasoning_text.delta","delta":"plan"}\n\n'));
+            controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"It is red [1]."}\n\n'));
             controller.close();
           },
         }), { status: 200 }));
@@ -200,7 +252,7 @@ describe("client boundary", () => {
     const offenders: string[] = [];
     for (const file of files) {
       const text = readFileSync(file, "utf8");
-      if (text.includes("generativelanguage.googleapis.com") || text.includes("GEMINI_API_KEY") || text.includes("process.env.API_KEY")) {
+      if (text.includes("generativelanguage.googleapis.com") || text.includes("api.x.ai") || text.includes("GEMINI_API_KEY") || text.includes("XAI_API_KEY") || text.includes("process.env.API_KEY")) {
         offenders.push(file);
       }
     }

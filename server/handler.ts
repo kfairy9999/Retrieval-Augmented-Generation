@@ -1,11 +1,14 @@
 import { formatDocument, formatQuery } from "../shared/embeddingText";
 import { CHAT_MODEL, EMBEDDING_MODEL } from "../shared/models";
+import { HttpError } from "./errors";
+import { embedTexts } from "./gemini";
+import { completeText, openAnswerStream, proxyGrokStream } from "./grok";
 import { buildAnswerRequest, buildRewritePrompt, standaloneQuery, type CitedChunk, type HistoryTurn } from "./prompt";
-import { embedTexts, generateText, HttpError, proxyGeminiStream, streamAnswer } from "./gemini";
 import { clientKey, SlidingWindowLimiter } from "./rateLimit";
 
 export interface ApiEnv {
   GEMINI_API_KEY?: string;
+  XAI_API_KEY?: string;
 }
 
 export interface Limiters {
@@ -45,7 +48,8 @@ export async function handleApi(request: Request, env: ApiEnv, deps: HandlerDeps
       console.log(JSON.stringify({ message: "api request", route: url.pathname, method: request.method }));
       return json({
         ok: true,
-        hasKey: Boolean(env.GEMINI_API_KEY),
+        hasEmbeddingKey: Boolean(env.GEMINI_API_KEY?.trim()),
+        hasChatKey: Boolean(env.XAI_API_KEY?.trim()),
         chatModel: CHAT_MODEL,
         embeddingModel: EMBEDDING_MODEL,
       });
@@ -73,15 +77,16 @@ export async function handleApi(request: Request, env: ApiEnv, deps: HandlerDeps
       );
     }
 
-    const apiKey = env.GEMINI_API_KEY?.trim() ?? "";
-    if (!apiKey) {
-      return json({ error: "The server is missing GEMINI_API_KEY." }, 500);
-    }
-
+    const geminiKey = env.GEMINI_API_KEY?.trim() ?? "";
+    const xaiKey = env.XAI_API_KEY?.trim() ?? "";
     const body = await readJson(request);
-    if (route === "embed") return await handleEmbed(body, apiKey, fetchImpl);
-    if (route === "rewrite") return await handleRewrite(body, apiKey, fetchImpl);
-    return await handleGenerate(body, apiKey, fetchImpl);
+    if (route === "embed") {
+      if (!geminiKey) return json({ error: "The server is missing GEMINI_API_KEY." }, 500);
+      return await handleEmbed(body, geminiKey, fetchImpl);
+    }
+    if (route === "rewrite") return await handleRewrite(body, xaiKey, fetchImpl);
+    if (!xaiKey) return json({ error: "The server is missing the Grok API key." }, 500);
+    return await handleGenerate(body, xaiKey, fetchImpl);
   } catch (error) {
     if (error instanceof HttpError) return json({ error: error.message }, error.status, error.headers);
     console.error(JSON.stringify({
@@ -117,10 +122,15 @@ async function handleRewrite(body: unknown, apiKey: string, fetchImpl: typeof fe
   const question = requiredString(record.question, "question", MAX_QUERY_CHARS);
   const history = parseHistory(record.history);
   if (history.length === 0) return json({ query: question });
+  if (!apiKey) throw new HttpError(500, "The server is missing the Grok API key.");
 
-  const text = await generateText(apiKey, "You rewrite questions into standalone search queries.", [
-    { role: "user", parts: [{ text: buildRewritePrompt(question, history) }] },
-  ], 256, fetchImpl);
+  const text = await completeText(
+    apiKey,
+    "You rewrite questions into standalone search queries.",
+    buildRewritePrompt(question, history),
+    256,
+    fetchImpl,
+  );
   return json({ query: standaloneQuery(text, question) });
 }
 
@@ -130,16 +140,17 @@ async function handleGenerate(body: unknown, apiKey: string, fetchImpl: typeof f
   const history = parseHistory(record.history);
   const chunks = parseChunks(record.chunks);
   const { system, contents } = buildAnswerRequest(question, history, chunks);
-  const upstream = await streamAnswer(apiKey, system, contents, 2048, fetchImpl);
+  const prompt = contents[0]?.parts[0]?.text ?? question;
+  const upstream = await openAnswerStream(apiKey, system, prompt, 1024, fetchImpl);
 
   if (!upstream.ok || !upstream.body) {
     const message = upstream.ok
-      ? "The Gemini API returned an empty stream."
+      ? "The Grok API returned an empty stream."
       : (await errorMessage(upstream));
     return json({ error: message }, upstream.ok ? 502 : upstream.status === 429 ? 429 : 502);
   }
 
-  return new Response(proxyGeminiStream(upstream.body), {
+  return new Response(proxyGrokStream(upstream.body), {
     headers: {
       "content-type": "text/event-stream; charset=utf-8",
       "cache-control": "no-store",
@@ -151,16 +162,16 @@ async function errorMessage(response: Response): Promise<string> {
   try {
     const payload = (await response.json()) as { error?: { message?: string } };
     console.error(JSON.stringify({
-      message: "gemini stream open failed",
+      message: "grok stream open failed",
       status: response.status,
       detail: (payload.error?.message ?? "").slice(0, 300),
     }));
   } catch {
-    console.error(JSON.stringify({ message: "gemini stream open failed", status: response.status }));
+    console.error(JSON.stringify({ message: "grok stream open failed", status: response.status }));
   }
-  if (response.status === 429) return "The Gemini API rate limit was reached. Wait a moment and try again.";
-  if (response.status === 401 || response.status === 403) return "The Gemini API rejected the server key.";
-  return "The Gemini API request failed.";
+  if (response.status === 429) return "The Grok API rate limit was reached. Wait a moment and try again.";
+  if (response.status === 401 || response.status === 403) return "The Grok API rejected the server key.";
+  return "The Grok API request failed.";
 }
 
 function parseHistory(value: unknown): HistoryTurn[] {

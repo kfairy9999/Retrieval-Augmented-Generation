@@ -3,7 +3,8 @@ import type { Message } from "../types";
 
 export interface Health {
   ok: boolean;
-  hasKey: boolean;
+  hasEmbeddingKey: boolean;
+  hasChatKey: boolean;
   chatModel: string;
   embeddingModel: string;
 }

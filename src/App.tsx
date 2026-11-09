@@ -16,7 +16,7 @@ const ACCEPTED = new Set([".txt", ".md", ".markdown", ".json", ".pdf"]);
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const NOT_FOUND = "I looked through the selected documents and didn't find a passage that answers that. Try another question, or add a file that covers it.";
 
-type KeyState = "checking" | "ready" | "missing" | "down";
+type KeyState = "checking" | "ready" | "missing" | "missing-chat" | "missing-embed" | "down";
 
 export default function App() {
   const [documents, setDocuments] = useState<UploadedDocument[]>([]);
@@ -53,7 +53,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const keyState: KeyState = apiDown ? "down" : !health ? "checking" : health.hasKey ? "ready" : "missing";
+  const keyState: KeyState = keyStateFrom(health, apiDown);
   const focused = messages.find((message) => message.id === focusedId) ?? null;
 
   const handleUpload = async (files: FileList) => {
@@ -330,12 +330,26 @@ export default function App() {
   );
 }
 
+function keyStateFrom(health: Health | null, apiDown: boolean): KeyState {
+  if (apiDown) return "down";
+  if (!health) return "checking";
+  if (health.hasEmbeddingKey && health.hasChatKey) return "ready";
+  if (!health.hasEmbeddingKey && !health.hasChatKey) return "missing";
+  if (!health.hasChatKey) return "missing-chat";
+  return "missing-embed";
+}
+
 function friendlyError(message: string): string {
+  if (message.startsWith("The server is missing the Grok")) {
+    return "I need a Grok API key on the server before I can answer. Add it to the server's env file and restart. The key stays off this page.";
+  }
   if (message.startsWith("The server is missing")) {
     return "I need a Gemini API key on the server before I can read this. Add it to the server's env file and restart. The key stays off this page.";
   }
   if (message.includes("rejected the server key")) {
-    return "Gemini didn't accept the server key. Check the key in the server's env file, then try again.";
+    return message.includes("Grok")
+      ? "Grok didn't accept the server key. Check the key in the server's env file, then try again."
+      : "Gemini didn't accept the server key. Check the key in the server's env file, then try again.";
   }
   if (message.includes("rate limit") || message.includes("Too many requests")) {
     return "We've asked for a lot in a short time. Wait a moment, then try again.";
@@ -343,8 +357,8 @@ function friendlyError(message: string): string {
   if (message.includes("no extractable text") || message.includes("No text")) {
     return "I couldn't find selectable text in that file. Scanned PDFs need OCR, which this app doesn't do.";
   }
-  if (message.includes("Gemini API request failed") || message.includes("empty stream") || message.includes("returned an error")) {
-    return "Gemini didn't answer that request. Nothing was saved on the server — please try again.";
+  if (message.includes("API request failed") || message.includes("empty stream") || message.includes("returned an error")) {
+    return "The model didn't answer that request. Nothing was saved on the server — please try again.";
   }
   return message;
 }
@@ -354,12 +368,16 @@ function KeyPill({ state }: { state: KeyState }) {
     checking: "border-[#e4d8cc] bg-[#f6eee7] text-[#4e433c]",
     ready: "border-[#b7dcc6] bg-[#e7f6ee] text-[#145c38]",
     missing: "border-[#e7c7a4] bg-[#fff3e4] text-[#6b3418]",
+    "missing-chat": "border-[#e7c7a4] bg-[#fff3e4] text-[#6b3418]",
+    "missing-embed": "border-[#e7c7a4] bg-[#fff3e4] text-[#6b3418]",
     down: "border-[#f0c2c8] bg-[#fff1f3] text-[#7a1f36]",
   };
   const labels: Record<KeyState, string> = {
     checking: "Checking the server",
-    ready: "Key is on the server",
-    missing: "Add a server key",
+    ready: "Keys are on the server",
+    missing: "Add server keys",
+    "missing-chat": "Add the Grok key",
+    "missing-embed": "Add the Gemini key",
     down: "Can't reach the server",
   };
   return (

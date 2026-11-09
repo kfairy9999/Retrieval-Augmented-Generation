@@ -6,10 +6,11 @@ import { apiDevPlugin } from "./server/devApi";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY || "";
+  const geminiApiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY || "";
+  const xaiApiKey = env.XAI_API_KEY || process.env.XAI_API_KEY || "";
 
   return {
-    plugins: [react(), tailwindcss(), apiDevPlugin(apiKey)],
+    plugins: [react(), tailwindcss(), apiDevPlugin({ geminiApiKey, xaiApiKey })],
     server: {
       port: 3000,
       host: "0.0.0.0",

@@ -24,8 +24,8 @@
       "head_sampling_rate": 0.01
     }
   },
-  // Set the value with `npx wrangler secret put GEMINI_API_KEY`. Do not put it here.
+  // Set values with `npx wrangler secret put <NAME>`. Do not put them here.
   "secrets": {
-    "required": ["GEMINI_API_KEY"]
+    "required": ["GEMINI_API_KEY", "XAI_API_KEY"]
   }
 }

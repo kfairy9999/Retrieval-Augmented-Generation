@@ -1,6 +1,6 @@
-/** Gemini model ids used by the server. The browser only displays these names. */
+/** Model ids displayed in the browser. The keys that call them stay on the server. */
 export const EMBEDDING_MODEL = "gemini-embedding-2";
-export const CHAT_MODEL = "gemini-3.8-flash";
+export const CHAT_MODEL = "grok-4.7";
 
 /** Recommended reduced size. Gemini Embedding 2 normalizes truncated dimensions. */
 export const EMBEDDING_DIMENSIONS = 768;
