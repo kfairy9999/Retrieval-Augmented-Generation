@@ -83,13 +83,15 @@ describe("prompts and SSE", () => {
   });
 
   it("keeps Grok answer deltas and drops reasoning deltas", () => {
-    expect(deltasFromGrokEvent(JSON.stringify({ type: "response.reasoning_text.delta", delta: "secret" })).deltas).toEqual([]);
-    expect(deltasFromGrokEvent(JSON.stringify({ type: "response.output_text.delta", delta: "Hi" })).deltas).toEqual(["Hi"]);
+    expect(deltasFromGrokEvent(JSON.stringify({
+      choices: [{ delta: { reasoning_content: "secret" } }],
+    })).deltas).toEqual([]);
+    expect(deltasFromGrokEvent(JSON.stringify({
+      choices: [{ delta: { content: "Hi" } }],
+    })).deltas).toEqual(["Hi"]);
+    expect(deltasFromGrokEvent("[DONE]").deltas).toEqual([]);
     expect(textFromGrokResponse({
-      output: [
-        { type: "reasoning" },
-        { type: "message", content: [{ type: "output_text", text: "plant energy" }] },
-      ],
+      choices: [{ message: { reasoning_content: "secret", content: "plant energy" } }],
     })).toBe("plant energy");
   });
 
@@ -97,9 +99,10 @@ describe("prompts and SSE", () => {
     const encoder = new TextEncoder();
     const upstream = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(encoder.encode('data: {"type":"response.reasoning_text.delta","delta":"secret"}\n\n'));
-        controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"Hi"}\n\n'));
-        controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":" there"}\n\n'));
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"reasoning_content":"secret"}}]}\n\n'));
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n'));
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":" there"}}]}\n\n'));
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
       },
     });
@@ -196,15 +199,23 @@ describe("HTTP API", () => {
         called = String(input);
         const headers = new Headers(init?.headers);
         expect(headers.get("authorization")).toBe("Bearer xai-secret");
-        const payload = JSON.parse(String(init?.body)) as { model: string; store: boolean; reasoning: { effort: string }; stream: boolean };
+        const payload = JSON.parse(String(init?.body)) as {
+          model: string;
+          reasoning_effort: string;
+          stream: boolean;
+          messages: Array<{ role: string }>;
+        };
         expect(payload.model).toBe("grok-4.7");
-        expect(payload.store).toBe(false);
-        expect(payload.reasoning.effort).toBe("low");
+        expect(payload.reasoning_effort).toBe("low");
         expect(payload.stream).toBe(false);
-        return new Response(JSON.stringify({ output_text: "photosynthesis energy storage" }), { status: 200 });
+        expect(payload.messages[0]?.role).toBe("system");
+        expect(payload.messages.at(-1)?.role).toBe("user");
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: "photosynthesis energy storage" } }],
+        }), { status: 200 });
       },
     });
-    expect(called).toBe("https://api.x.ai/v1/responses");
+    expect(called).toBe("https://api.x.ai/v1/chat/completions");
     expect(called).not.toContain("xai-secret");
     await expect(response.json()).resolves.toEqual({ query: "photosynthesis energy storage" });
   });
@@ -218,22 +229,21 @@ describe("HTTP API", () => {
     }), { XAI_API_KEY: "xai-secret" }, {
       limiters: limiters(),
       fetchImpl: (input, init) => {
-        expect(String(input)).toBe("https://api.x.ai/v1/responses");
+        expect(String(input)).toBe("https://api.x.ai/v1/chat/completions");
         const payload = JSON.parse(String(init?.body)) as {
           model: string;
           stream: boolean;
-          store: boolean;
-          input: Array<{ role: string; content: string }>;
+          messages: Array<{ role: string; content: string }>;
         };
         expect(payload.model).toBe("grok-4.7");
         expect(payload.stream).toBe(true);
-        expect(payload.store).toBe(false);
-        expect(payload.input[0]?.content).toMatch(/untrusted/i);
-        expect(payload.input.at(-1)?.role).toBe("user");
+        expect(payload.messages[0]?.content).toMatch(/untrusted/i);
+        expect(payload.messages.at(-1)?.role).toBe("user");
         return Promise.resolve(new Response(new ReadableStream({
           start(controller) {
-            controller.enqueue(encoder.encode('data: {"type":"response.reasoning_text.delta","delta":"plan"}\n\n'));
-            controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"It is red [1]."}\n\n'));
+            controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"reasoning_content":"plan"}}]}\n\n'));
+            controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"It is red [1]."}}]}\n\n'));
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
             controller.close();
           },
         }), { status: 200 }));

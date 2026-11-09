@@ -61,7 +61,7 @@ These are the choices in this repo, not a claim about production RAG in general.
 
 **The API keys are not in the bundle.** The original AI Studio project injected `GEMINI_API_KEY` with Vite `define`, so a public deploy would have shipped the key. The browser now calls `/api/embed`, `/api/rewrite`, and `/api/generate`. Locally those routes are Vite middleware. In production they are a Worker, and static files are Workers assets. `npm run check:bundle` fails the build if the client output contains either key name or either provider host.
 
-**Answers use Grok because that is the current text model. Embeddings stay on Gemini because xAI's model list has no embedding model.** Checked against [docs.x.ai/docs/models](https://docs.x.ai/docs/models) on November 9, 2026: the listed models are text, image, video, and voice. There is no public endpoint that turns a string into a vector. Collections can index uploaded files with an internal `grok-embedding-small` setting, but that stores documents in xAI and does not return vectors for this browser index. So `/api/embed` still calls `gemini-embedding-2`, and `/api/rewrite` plus `/api/generate` call `grok-4.7` through `POST https://api.x.ai/v1/responses`. Requests set `store: false` so xAI is not asked to keep the passage text, `reasoning.effort` is `low`, and sampling uses the documented `temperature` 0.7 and `top_p` 0.95. The stream forwards only `response.output_text.delta` events and drops reasoning deltas.
+**Answers use Grok because that is the current text model. Embeddings stay on Gemini because xAI's model list has no embedding model.** Checked against [docs.x.ai/docs/models](https://docs.x.ai/docs/models) on November 9, 2026: the listed models are text, image, video, and voice. There is no public endpoint that turns a string into a vector. Collections can index uploaded files with an internal `grok-embedding-small` setting, but that stores documents in xAI and does not return vectors for this browser index. So `/api/embed` still calls `gemini-embedding-2`. `/api/rewrite` and `/api/generate` call `grok-4.7` at `POST https://api.x.ai/v1/chat/completions` with a Bearer `XAI_API_KEY`. Streaming follows the documented SSE shape: answer text is `choices[].delta.content`, reasoning is `choices[].delta.reasoning_content` and is not shown, and the stream ends with `data: [DONE]`. Reasoning effort is `low`. Sampling uses `temperature` 0.7 and `top_p` 0.95.
 
 **Embeddings use the current task format.** `text-embedding-004` was shut down. `gemini-embedding-2` does not take `taskType`. Documents are embedded as `title: … | text: …` and questions as `task: question answering | query: …`, which is the asymmetric format in the Gemini embeddings docs. Vectors are requested at 768 dimensions. Cosine similarity is a score, and the UI does not call it a probability.
 
@@ -73,7 +73,7 @@ These are the choices in this repo, not a claim about production RAG in general.
 
 **Empty retrieval skips generation.** No chunks means a fixed "I couldn't find relevant passages" reply. If chunks exist, they are shown with scores and the model may still decline.
 
-**Streaming drops reasoning deltas.** `/api/generate` proxies the Grok Responses stream and forwards only `response.output_text.delta`. Reasoning effort is `low` so a short grounded answer is less likely to wait on a long trace. Grok cannot turn reasoning off.
+**Streaming drops reasoning deltas.** `/api/generate` proxies the Grok chat-completions stream and forwards only `delta.content`. Reasoning effort is `low` so a short grounded answer is less likely to wait on a long trace. Grok cannot turn reasoning off.
 
 **The rate limit is local.** Each route has a sliding window keyed by a hash of the client IP: 40 embed calls, 12 rewrites, and 12 generations per minute. Bodies are capped at 128 KB, embed batches at 16 texts, and answers at 6 passages. On Workers the counters live in one isolate, so this is a demo brake, not an account-wide quota.
 
@@ -87,7 +87,7 @@ These are the choices in this repo, not a claim about production RAG in general.
 | Build | Vite 6 |
 | PDF text | PDF.js, loaded only when a PDF is uploaded |
 | Embeddings | Gemini `gemini-embedding-2`, 768 dimensions |
-| Answers | xAI `grok-4.7` via the Responses API, streamed |
+| Answers | xAI `grok-4.7` via chat completions, streamed |
 | Retrieval | In-browser cosine similarity |
 | Server | Vite middleware locally, Cloudflare Worker plus static assets in production |
 | Tests | Vitest |
@@ -152,7 +152,7 @@ After deploy, the Workers URL is the live demo. Put it in the placeholder at the
 - Scanned PDFs are unsupported.
 - The rate limit does not coordinate across Worker isolates. A public demo also needs quota alerts on both the Gemini key and the Grok key.
 - Passage text is sent to Gemini to be embedded and to Grok to be answered. Do not upload documents you cannot send to those APIs.
-- xAI's Responses API can store requests for 30 days unless `store` is false. This app sets `store: false`. That is a request flag, not a guarantee I have verified against a live account.
+- Chat completions does not accept the Responses API `store` flag. Passage text is still sent to xAI for the answer. Do not treat that as a promise that xAI discards the request.
 
 ## License
 

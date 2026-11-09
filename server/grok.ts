@@ -2,58 +2,41 @@ import { CHAT_MODEL } from "../shared/models";
 import { encodeSse, takeSseEvents } from "../shared/sse";
 import { HttpError } from "./errors";
 
-const RESPONSES_URL = "https://api.x.ai/v1/responses";
+const CHAT_URL = "https://api.x.ai/v1/chat/completions";
 
-interface GrokOutputPart {
-  type?: string;
-  text?: string;
+interface GrokChoice {
+  delta?: { content?: string | null; reasoning_content?: string };
+  message?: { content?: string | null; reasoning_content?: string };
 }
 
-interface GrokOutputItem {
-  type?: string;
-  content?: GrokOutputPart[];
-}
-
-interface GrokResponse {
-  output_text?: string;
-  output?: GrokOutputItem[];
+interface GrokChatPayload {
   error?: { message?: string };
+  choices?: GrokChoice[];
 }
 
-interface GrokStreamEvent {
-  type?: string;
-  delta?: string;
-  error?: { message?: string };
-}
-
-/** Pull visible answer text out of one Responses API SSE payload. Reasoning deltas are ignored. */
+/**
+ * Visible answer text from one chat-completions SSE payload.
+ * Docs show reasoning in `delta.reasoning_content` and the answer in `delta.content`.
+ * https://docs.x.ai/developers/model-capabilities/text/streaming
+ */
 export function deltasFromGrokEvent(data: string): { deltas: string[]; error?: string } {
   if (data === "[DONE]") return { deltas: [] };
-  let parsed: GrokStreamEvent;
+  let parsed: GrokChatPayload;
   try {
-    parsed = JSON.parse(data) as GrokStreamEvent;
+    parsed = JSON.parse(data) as GrokChatPayload;
   } catch {
     return { deltas: [] };
   }
   if (parsed.error?.message) return { deltas: [], error: parsed.error.message };
-  if (parsed.type === "response.output_text.delta" && typeof parsed.delta === "string" && parsed.delta.length > 0) {
-    return { deltas: [parsed.delta] };
-  }
+  const content = parsed.choices?.[0]?.delta?.content;
+  if (typeof content === "string" && content.length > 0) return { deltas: [content] };
   return { deltas: [] };
 }
 
 export function textFromGrokResponse(payload: unknown): string {
   if (!payload || typeof payload !== "object") return "";
-  const record = payload as GrokResponse;
-  if (typeof record.output_text === "string" && record.output_text.trim()) return record.output_text;
-  const parts: string[] = [];
-  for (const item of record.output ?? []) {
-    if (item.type === "reasoning") continue;
-    for (const part of item.content ?? []) {
-      if (part.type === "output_text" && part.text) parts.push(part.text);
-    }
-  }
-  return parts.join("");
+  const content = (payload as GrokChatPayload).choices?.[0]?.message?.content;
+  return typeof content === "string" ? content : "";
 }
 
 export async function completeText(
@@ -63,13 +46,13 @@ export async function completeText(
   maxOutputTokens: number,
   fetchImpl: typeof fetch,
 ): Promise<string> {
-  const response = await fetchImpl(RESPONSES_URL, {
+  const response = await fetchImpl(CHAT_URL, {
     method: "POST",
     headers: grokHeaders(apiKey),
     body: JSON.stringify(requestBody(system, user, maxOutputTokens, false)),
   });
   if (!response.ok) throw await upstreamError(response);
-  const payload = (await response.json()) as GrokResponse;
+  const payload = (await response.json()) as GrokChatPayload;
   if (payload.error?.message) {
     console.error(JSON.stringify({ message: "grok complete error", detail: payload.error.message.slice(0, 300) }));
     throw new HttpError(502, "The Grok API returned an error.");
@@ -84,7 +67,7 @@ export function openAnswerStream(
   maxOutputTokens: number,
   fetchImpl: typeof fetch,
 ): Promise<Response> {
-  return fetchImpl(RESPONSES_URL, {
+  return fetchImpl(CHAT_URL, {
     method: "POST",
     headers: grokHeaders(apiKey),
     body: JSON.stringify(requestBody(system, user, maxOutputTokens, true)),
@@ -147,15 +130,14 @@ function grokHeaders(apiKey: string): HeadersInit {
 function requestBody(system: string, user: string, maxOutputTokens: number, stream: boolean) {
   return {
     model: CHAT_MODEL,
-    input: [
+    messages: [
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    reasoning: { effort: "low" },
+    reasoning_effort: "low",
     temperature: 0.7,
     top_p: 0.95,
-    max_output_tokens: maxOutputTokens,
-    store: false,
+    max_tokens: maxOutputTokens,
     stream,
   };
 }
