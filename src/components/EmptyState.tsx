@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { FileUp, MessagesSquare, TextSearch } from "lucide-react";
+import { BookOpenText, FileUp, MessagesSquare, TextSearch } from "lucide-react";
 
 const steps = [
   {
@@ -21,9 +21,13 @@ const steps = [
 
 interface EmptyStateProps {
   onUpload: (files: FileList) => void;
+  onTrySample?: () => void;
+  sampleReady?: boolean;
+  sampleQuestions?: string[];
+  onAsk?: (question: string) => void;
 }
 
-export function EmptyState({ onUpload }: EmptyStateProps) {
+export function EmptyState({ onUpload, onTrySample, sampleReady = false, sampleQuestions = [], onAsk }: EmptyStateProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -56,8 +60,36 @@ export function EmptyState({ onUpload }: EmptyStateProps) {
           <FileUp className="h-4 w-4" aria-hidden="true" />
           Add your first document
         </button>
-        <p className="mt-2 text-sm text-[#4e433c]">PDF, Markdown, text, or JSON. Up to 2 MB each.</p>
+        {onTrySample && (
+          <button
+            type="button"
+            onClick={onTrySample}
+            disabled={sampleReady}
+            className="ml-0 mt-3 inline-flex min-h-11 items-center gap-2 rounded-full border border-[#d9c3b2] bg-white px-5 text-sm font-semibold text-[#6b2e1c] transition hover:bg-[#fbf3ec] disabled:opacity-70 sm:ml-3 sm:mt-0"
+          >
+            <BookOpenText className="h-4 w-4" aria-hidden="true" />
+            {sampleReady ? "Sample document is loaded" : "Try the sample document"}
+          </button>
+        )}
+        <p className="mt-2 text-sm text-[#4e433c]">PDF, Markdown, text, or JSON. Up to 2 MB each. The sample is a short note about how this app works.</p>
       </div>
+      {sampleReady && onAsk && sampleQuestions.length > 0 && (
+        <div className="mt-6">
+          <p className="text-sm font-semibold text-[#2a211c]">Ask the sample something</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {sampleQuestions.map((question) => (
+              <button
+                key={question}
+                type="button"
+                onClick={() => onAsk(question)}
+                className="min-h-11 rounded-full border border-[#e4d8cc] bg-[#f6eee7] px-4 text-left text-sm font-medium text-[#2a211c] transition hover:bg-[#efe2d6]"
+              >
+                {question}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <ol className="mt-8 grid gap-4 sm:grid-cols-3">
         {steps.map((step, index) => (
           <li key={step.title} className="rounded-3xl border border-[#eadfd4] bg-white/80 p-5 shadow-sm">

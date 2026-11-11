@@ -48,7 +48,10 @@ export function splitText(text: string, docId: string, sourceName: string): Docu
     }
 
     if (end >= normalized.length) break;
-    const next = Math.max(start + 1, end - CHUNK_OVERLAP);
+    let next = Math.max(start + 1, end - CHUNK_OVERLAP);
+    // Start the overlap on a word boundary so a passage does not open mid-word.
+    const space = normalized.slice(next, next + 40).search(/\s/);
+    if (space > 0 && next + space + 1 < end) next = next + space + 1;
     if (next <= start) throw new Error("Chunking did not advance.");
     start = next;
   }

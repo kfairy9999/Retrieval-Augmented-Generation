@@ -17,7 +17,11 @@ The vector index stays in the browser tab. Both API keys stay on the server.
 
 The header pill still comes from `/api/health`. It does not mean the browser was given a key.
 
-**Live demo:** _Not deployed. This repository includes the Cloudflare config, and the URL can go here after the first deploy._
+**Live demo:** [personal-knowledge-engine.kfairley9999.workers.dev](https://personal-knowledge-engine.kfairley9999.workers.dev). Open it, tap **Try the sample document**, then tap a suggested question.
+
+The public deployment does not have API keys yet, so it runs in a labeled **demo mode**: search uses keyword vectors computed in the browser instead of Gemini embeddings, and instead of a written Grok answer it shows the passages that matched, best first, with clickable citations. That retrieval is real; nothing on the page is pre-written output. Once both secrets are set (see [Deploy](#deploy-to-cloudflare)), the same page switches to Gemini embeddings and streamed Grok answers with no code change.
+
+![Demo mode on the live site: the sample document is loaded and the question "Where do the API keys live?" returns the matching passages with citations.](docs/demo-mode.png)
 
 ## What it does
 
@@ -117,7 +121,7 @@ npm run build && npm run preview
 
 ## Deploy to Cloudflare
 
-This repo is not deployed. Nothing here has been published to a Workers subdomain.
+Deployed November 10, 2026 as the Worker `personal-knowledge-engine` at [personal-knowledge-engine.kfairley9999.workers.dev](https://personal-knowledge-engine.kfairley9999.workers.dev). Neither secret is set yet, so the live site runs in demo mode.
 
 The Worker is configured in `wrangler.jsonc`: static assets from `dist/`, `/api/*` handled by `worker/index.ts` before the SPA fallback, Workers Logs, traces sampled at 1%, and both `GEMINI_API_KEY` and `XAI_API_KEY` declared as required secrets. Compatibility date is 2026-11-08.
 
@@ -137,9 +141,13 @@ npx wrangler secret put XAI_API_KEY
 
 Paste the key at each prompt. Each command stores that secret and publishes a new Worker version. You can also add both secrets in the dashboard under the Worker's settings, then run `npm run deploy` again. Do not put either key in `wrangler.jsonc` or in git.
 
-After deploy, the Workers URL is the live demo. Put it in the placeholder at the top of this file. Preview URLs are public unless you add an access policy.
+Preview URLs are public unless you add an access policy.
 
 `npx wrangler dev`, after a build, runs the Worker and the static assets locally. It reads both keys from `.env` when `.dev.vars` is absent.
+
+### Demo mode without keys
+
+`/api/health` reports which keys exist, never their values. Without `GEMINI_API_KEY`, `src/lib/keyword.ts` turns each passage into a 4,096-slot hashed bag of words (stop words removed, light stemming, sublinear term frequency) and ranks with the same cosine similarity, so `rankChunks` is unchanged. Keyword search matches words, not meaning. Without `XAI_API_KEY`, the app skips the follow-up rewrite and the answer call and lists the retrieved passages instead. A banner and the header pill say which mode is on. `tests/keyword.test.ts` checks that the bundled sample's "Where do the API keys live?" question ranks the right section first.
 
 ## Limitations and next steps
 
