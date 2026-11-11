@@ -13,9 +13,9 @@ The vector index stays in the browser tab. Both API keys stay on the server.
 ![Gemini](https://img.shields.io/badge/Gemini_embeddings-8E75B2?logo=googlegemini&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
-![Welcome screen. The pill says to add server keys because this session has neither the Grok key nor the Gemini key.](docs/screenshot.png)
+![Welcome screen on the live site, in demo mode because the server has neither key yet.](docs/screenshot.png)
 
-The header pill still comes from `/api/health`. It does not mean the browser was given a key.
+The header pill comes from `/api/health`, which reports whether each key exists, never its value.
 
 **Live demo:** [personal-knowledge-engine.kfairley9999.workers.dev](https://personal-knowledge-engine.kfairley9999.workers.dev). Open it, tap **Try the sample document**, then tap a suggested question.
 
