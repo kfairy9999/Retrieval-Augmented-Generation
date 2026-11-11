@@ -10,10 +10,18 @@ import { embedTexts, fetchHealth, historyFromMessages, rewriteQuery, streamAnswe
 import { chunksForPrompt, indexDocument } from "./lib/ingest";
 import { resolveSearchQuery } from "./lib/resolveQuery";
 import { vectorStore } from "./lib/rag";
+import { keywordVectors, tokenize } from "./lib/keyword";
+import sampleText from "./samples/how-this-app-works.md?raw";
 import { DocStatus, type Message, type UploadedDocument } from "./types";
 
 const ACCEPTED = new Set([".txt", ".md", ".markdown", ".json", ".pdf"]);
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
+export const SAMPLE_NAME = "how-this-app-works.md";
+export const SAMPLE_QUESTIONS = [
+  "Where do the API keys live?",
+  "How are documents split into passages?",
+  "What does this demo not do?",
+];
 const NOT_FOUND = "I looked through the selected documents and didn't find a passage that answers that. Try another question, or add a file that covers it.";
 
 type KeyState = "checking" | "ready" | "missing" | "missing-chat" | "missing-embed" | "down";
@@ -54,9 +62,15 @@ export default function App() {
   }, []);
 
   const keyState: KeyState = keyStateFrom(health, apiDown);
+  // Without an embedding key the app still works, using keyword vectors computed in this tab.
+  const keywordMode = health !== null && !health.hasEmbeddingKey;
+  const passagesOnly = health !== null && !health.hasChatKey;
+  const embedDocuments = (pieces: string[], title: string) =>
+    keywordMode ? Promise.resolve(keywordVectors(pieces)) : embedTexts(pieces, "document", title);
+  const embedQuery = (text: string) => (keywordMode ? Promise.resolve(keywordVectors([text])) : embedTexts([text], "query"));
   const focused = messages.find((message) => message.id === focusedId) ?? null;
 
-  const handleUpload = async (files: FileList) => {
+  const handleUpload = async (files: FileList | File[]) => {
     const incoming = Array.from(files);
     if (incoming.length > 10) {
       setNotice("Let's keep it to 10 files at a time.");
@@ -111,7 +125,7 @@ export default function App() {
           docId,
           file.name,
           vectorStore,
-          (pieces) => embedTexts(pieces, "document", file.name),
+          (pieces) => embedDocuments(pieces, file.name),
           () => cancelledRef.current.has(docId),
           (progress) => {
             setDocuments((prev) => prev.map((doc) => (
@@ -142,8 +156,13 @@ export default function App() {
     setSelectedDocIds((prev) => prev.filter((docId) => docId !== id));
   };
 
-  const handleSend = async () => {
-    const question = input.trim();
+  const loadSample = () => {
+    if (documents.some((doc) => doc.name === SAMPLE_NAME)) return;
+    void handleUpload([new File([sampleText], SAMPLE_NAME, { type: "text/markdown" })]);
+  };
+
+  const handleSend = async (preset?: string) => {
+    const question = (preset ?? input).trim();
     if (!question || isProcessing) return;
 
     const readyIds = selectedDocIds.filter((id) => (
@@ -186,12 +205,19 @@ export default function App() {
       const searchQuery = await resolveSearchQuery(
         question,
         prior.length > 0,
-        () => rewriteQuery(question, prior),
+        () => (passagesOnly ? Promise.resolve(question) : rewriteQuery(question, prior)),
       );
-      const [queryEmbedding] = await embedTexts([searchQuery], "query");
-      const sources = vectorStore.search(queryEmbedding, readyIds, TOP_K);
+      const [queryEmbedding] = await embedQuery(searchQuery);
+      const ranked = vectorStore.search(queryEmbedding, readyIds, TOP_K);
+      // A keyword score of 0 means the passage shares no words with the question.
+      const sources = keywordMode ? ranked.filter((source) => source.score > 0) : ranked;
       if (sources.length === 0) {
         updateAssistant({ content: NOT_FOUND, status: "refused", searchQuery, sources: [] });
+        return;
+      }
+
+      if (passagesOnly) {
+        updateAssistant({ content: passagesOnlyReply(sources, question), status: "done", searchQuery, sources });
         return;
       }
 
@@ -245,6 +271,8 @@ export default function App() {
       )}
       <div className={`fixed inset-y-0 left-0 z-40 transition-transform duration-300 ease-out md:static md:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <Sidebar
+          keywordMode={keywordMode}
+          passagesOnly={passagesOnly}
           documents={documents}
           selectedDocIds={selectedDocIds}
           notice={notice}
@@ -292,7 +320,16 @@ export default function App() {
           </div>
         </header>
 
-        {messages.length === 0 ? <EmptyState onUpload={(files) => void handleUpload(files)} /> : (
+        {(keywordMode || passagesOnly) && <DemoBanner keywordMode={keywordMode} passagesOnly={passagesOnly} />}
+        {messages.length === 0 ? (
+          <EmptyState
+            onUpload={(files) => void handleUpload(files)}
+            onTrySample={loadSample}
+            sampleReady={documents.some((doc) => doc.name === SAMPLE_NAME && doc.status === DocStatus.INDEXED)}
+            sampleQuestions={SAMPLE_QUESTIONS}
+            onAsk={(question) => void handleSend(question)}
+          />
+        ) : (
           <MessageList
             messages={messages}
             onCite={(messageId, index) => {
@@ -326,6 +363,52 @@ export default function App() {
         open={contextOpen}
         onClose={() => setContextOpen(false)}
       />
+    </div>
+  );
+}
+
+/** The sentence in a passage that shares the most words with the question. */
+export function bestSentence(content: string, question: string): string {
+  const wanted = new Set(tokenize(question));
+  const sentences = content
+    .replace(/^#+\s*/gm, "")
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((sentence) => sentence.replace(/\s+/g, " ").trim())
+    .filter((sentence) => sentence.length > 30 && /[.!?]["')]?$/.test(sentence));
+  let best = sentences[0] ?? content.trim();
+  let bestScore = -1;
+  for (const sentence of sentences) {
+    const score = new Set(tokenize(sentence).filter((token) => wanted.has(token))).size;
+    if (score > bestScore) {
+      best = sentence;
+      bestScore = score;
+    }
+  }
+  return best.length > 180 ? `${best.slice(0, 177).trimEnd()}…` : best;
+}
+
+function passagesOnlyReply(sources: { content: string; metadata: { source: string; page?: number } }[], question: string): string {
+  const lines = sources.map((source, index) => {
+    const where = source.metadata.page ? `${source.metadata.source}, page ${source.metadata.page}` : source.metadata.source;
+    return `${index + 1}. [${index + 1}] *${where}*: "${bestSentence(source.content, question)}"`;
+  });
+  return [
+    "**Retrieval ran, but no answer was written.** This public demo has no Grok key yet, so instead of a generated answer here are the passages an answer would be grounded in, best match first:",
+    "",
+    ...lines,
+    "",
+    "Tap a number to read the full passage.",
+  ].join("\n");
+}
+
+function DemoBanner({ keywordMode, passagesOnly }: { keywordMode: boolean; passagesOnly: boolean }) {
+  const parts = [
+    keywordMode ? "keyword search in your browser" : null,
+    passagesOnly ? "matching passages instead of written answers" : null,
+  ].filter(Boolean);
+  return (
+    <div role="status" className="border-b border-[#ead3b0] bg-[#fff8ee] px-4 py-2.5 text-sm leading-6 text-[#5a2c14] sm:px-6">
+      <span className="font-semibold">Demo mode:</span> {parts.join(" and ")}, until API keys are added on the server.
     </div>
   );
 }
@@ -375,9 +458,9 @@ function KeyPill({ state }: { state: KeyState }) {
   const labels: Record<KeyState, string> = {
     checking: "Checking the server",
     ready: "Keys are on the server",
-    missing: "Add server keys",
-    "missing-chat": "Add the Grok key",
-    "missing-embed": "Add the Gemini key",
+    missing: "Demo mode",
+    "missing-chat": "Demo mode: passages only",
+    "missing-embed": "Demo mode: keyword search",
     down: "Can't reach the server",
   };
   return (

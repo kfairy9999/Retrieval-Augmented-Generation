@@ -14,6 +14,8 @@ import { CHAT_MODEL, EMBEDDING_MODEL } from "../../shared/models";
 import { DocStatus, type UploadedDocument } from "../types";
 
 interface SidebarProps {
+  keywordMode?: boolean;
+  passagesOnly?: boolean;
   documents: UploadedDocument[];
   selectedDocIds: string[];
   notice: string | null;
@@ -25,6 +27,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({
+  keywordMode = false,
+  passagesOnly = false,
   documents,
   selectedDocIds,
   notice,
@@ -173,8 +177,8 @@ export function Sidebar({
       </div>
 
       <div className="border-t border-[#eadfd4] px-5 py-4 text-sm leading-6 text-[#4e433c]">
-        <p>Embeddings · {EMBEDDING_MODEL}</p>
-        <p>Answers · {CHAT_MODEL}</p>
+        <p>Search · {keywordMode ? "keyword match (demo)" : EMBEDDING_MODEL}</p>
+        <p>Answers · {passagesOnly ? "passages only (demo)" : CHAT_MODEL}</p>
       </div>
     </aside>
   );
