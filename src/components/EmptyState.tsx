@@ -1,23 +1,27 @@
 import { useRef } from "react";
 import { BookOpenText, FileUp, MessagesSquare, TextSearch } from "lucide-react";
 
-const steps = [
-  {
-    icon: FileUp,
-    title: "Add a document",
-    body: "A PDF, a markdown note, or a plain text file is enough to begin.",
-  },
-  {
-    icon: TextSearch,
-    title: "Give it a moment",
-    body: "The passages stay in this tab and become searchable once indexing finishes.",
-  },
-  {
-    icon: MessagesSquare,
-    title: "Ask in your own words",
-    body: "The reply points back at the passages, so you can check the source.",
-  },
-];
+function stepsFor(persisted: boolean) {
+  return [
+    {
+      icon: FileUp,
+      title: "Add a document",
+      body: "A PDF, a markdown note, or a plain text file is enough to begin.",
+    },
+    {
+      icon: TextSearch,
+      title: "Give it a moment",
+      body: persisted
+        ? "Passages are saved in this browser and become searchable once indexing finishes."
+        : "Passages stay in this tab and become searchable once indexing finishes.",
+    },
+    {
+      icon: MessagesSquare,
+      title: "Ask in your own words",
+      body: "The reply points back at the passages, so you can check the source.",
+    },
+  ];
+}
 
 interface EmptyStateProps {
   onUpload: (files: FileList) => void;
@@ -25,9 +29,21 @@ interface EmptyStateProps {
   sampleReady?: boolean;
   sampleQuestions?: string[];
   onAsk?: (question: string) => void;
+  libraryReady?: boolean;
+  persisted?: boolean;
+  savedCount?: number;
 }
 
-export function EmptyState({ onUpload, onTrySample, sampleReady = false, sampleQuestions = [], onAsk }: EmptyStateProps) {
+export function EmptyState({
+  onUpload,
+  onTrySample,
+  sampleReady = false,
+  sampleQuestions = [],
+  onAsk,
+  libraryReady = true,
+  persisted = true,
+  savedCount = 0,
+}: EmptyStateProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -38,7 +54,7 @@ export function EmptyState({ onUpload, onTrySample, sampleReady = false, sampleQ
         What do you want to ask your documents?
       </h2>
       <p className="mt-4 max-w-xl text-base leading-7 text-[#4e433c]">
-        Add a file you already trust. I’ll keep the passages in this tab and show them beside the answer, so you can check my work.
+        {welcomeCopy(libraryReady, persisted, savedCount, sampleReady)}
       </p>
       <div className="mt-6">
         <input
@@ -55,7 +71,8 @@ export function EmptyState({ onUpload, onTrySample, sampleReady = false, sampleQ
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
-          className="inline-flex min-h-11 items-center gap-2 rounded-full bg-[#8c3a24] px-5 text-sm font-semibold text-white transition hover:bg-[#732f1d]"
+          disabled={!libraryReady}
+          className="inline-flex min-h-11 items-center gap-2 rounded-full bg-[#8c3a24] px-5 text-sm font-semibold text-white transition hover:bg-[#732f1d] disabled:opacity-70"
         >
           <FileUp className="h-4 w-4" aria-hidden="true" />
           Add your first document
@@ -64,7 +81,7 @@ export function EmptyState({ onUpload, onTrySample, sampleReady = false, sampleQ
           <button
             type="button"
             onClick={onTrySample}
-            disabled={sampleReady}
+            disabled={!libraryReady || sampleReady}
             className="ml-0 mt-3 inline-flex min-h-11 items-center gap-2 rounded-full border border-[#d9c3b2] bg-white px-5 text-sm font-semibold text-[#6b2e1c] transition hover:bg-[#fbf3ec] disabled:opacity-70 sm:ml-3 sm:mt-0"
           >
             <BookOpenText className="h-4 w-4" aria-hidden="true" />
@@ -91,7 +108,7 @@ export function EmptyState({ onUpload, onTrySample, sampleReady = false, sampleQ
         </div>
       )}
       <ol className="mt-8 grid gap-4 sm:grid-cols-3">
-        {steps.map((step, index) => (
+        {stepsFor(persisted).map((step, index) => (
           <li key={step.title} className="rounded-3xl border border-[#eadfd4] bg-white/80 p-5 shadow-sm">
             <div className="flex items-center gap-2 text-[#8c3a24]">
               <step.icon className="h-4 w-4" aria-hidden="true" />
@@ -105,4 +122,16 @@ export function EmptyState({ onUpload, onTrySample, sampleReady = false, sampleQ
       </div>
     </div>
   );
+}
+
+function welcomeCopy(libraryReady: boolean, persisted: boolean, savedCount: number, sampleReady: boolean): string {
+  if (!libraryReady) return "Opening documents saved in this browser.";
+  if (sampleReady && savedCount === 1) {
+    return "The sample document is still in this browser. It is a short demo about this app, not your own files. Ask one of the questions below, or add a file of your own.";
+  }
+  if (savedCount > 0) return "Your documents are still in this browser. Ask a question whenever you’re ready.";
+  if (persisted) {
+    return "Add a file you already trust. I’ll keep the passages in this browser, including after a refresh, and show them beside the answer.";
+  }
+  return "Add a file you already trust. I’ll keep the passages in this tab until you close it, and show them beside the answer.";
 }

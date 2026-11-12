@@ -19,6 +19,10 @@ export interface UploadedDocument {
   uploadedAt: Date;
   error?: string;
   truncated?: boolean;
+  /** Bundled sample. A restored copy stays labeled as a demo, not as a personal file. */
+  demo?: boolean;
+  /** False when this indexed document exists only in tab memory. */
+  stored?: boolean;
 }
 
 export interface DocumentChunk {

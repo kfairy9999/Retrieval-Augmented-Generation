@@ -2,7 +2,7 @@
 
 A retrieval-augmented generation app for your own documents. It chunks what you upload, embeds the chunks with Gemini, and streams a Grok answer that cites the passages it actually retrieved.
 
-The vector index stays in the browser tab. Both API keys stay on the server.
+The vector index stays in this browser, in IndexedDB. Both API keys stay on the server.
 
 [![CI](https://github.com/kfairy9999/Retrieval-Augmented-Generation/actions/workflows/ci.yml/badge.svg)](https://github.com/kfairy9999/Retrieval-Augmented-Generation/actions/workflows/ci.yml)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
@@ -32,7 +32,7 @@ The public deployment does not have API keys yet, so it runs in a labeled **demo
 - Click a citation to scroll the matching passage. The context panel shows the passage text and its cosine score.
 - Ask a follow-up. When there is conversation history, Grok rewrites the question into a standalone search query, Gemini embeds that query, and the answer still sees the recent turns.
 - If the selected documents have no matching chunks, it says so and does not call the generator.
-- Delete a document and its vectors. Refreshing the tab clears the index.
+- Delete a document and its chunks and vectors. A refresh or a closed tab keeps the library. A clear control removes every saved document from this browser. The bundled sample, if you load it, is stored the same way and stays labeled as a demo.
 
 ## Architecture
 
@@ -42,7 +42,7 @@ flowchart TD
   extract --> chunk["Chunk with overlap"]
   chunk --> embed["POST /api/embed"]
   embed --> vectors["gemini-embedding-2"]
-  vectors --> store["In-memory vector store"]
+  vectors --> store["IndexedDB documents and chunks"]
 
   question["Question plus recent turns"] --> rewrite["POST /api/rewrite"]
   rewrite --> chat["grok-4.7"]
@@ -55,13 +55,13 @@ flowchart TD
   generate --> answer["Streamed answer with passage markers"]
 ```
 
-Ingestion and retrieval run in the page. The dev server, and the Cloudflare Worker in production, proxy two providers. `/api/embed` calls Gemini. `/api/rewrite` and `/api/generate` call Grok. A request sends chunk text to be embedded, or the question, a short history, and the top passages to be answered. The original file is not stored on the server.
+Ingestion and retrieval run in the page. The dev server, and the Cloudflare Worker in production, proxy two providers. `/api/embed` calls Gemini. `/api/rewrite` and `/api/generate` call Grok. A request sends chunk text to be embedded, or the question, a short history, and the top passages to be answered. The original file is not stored on the server. On load the page reads the same IndexedDB database and restores documents and vectors. If IndexedDB cannot be opened, or a write runs out of space, the page says so and keeps that session in memory only.
 
 ## Engineering decisions
 
 These are the choices in this repo, not a claim about production RAG in general.
 
-**The index stays in the tab.** Chunks and vectors live in a module-level store. That keeps a personal demo from uploading whole documents, and it means a refresh wipes the index. There is no database.
+**The index stays on this device.** Passages and vectors are IndexedDB records in the browser, in two collections. `documents` holds id, name, type, size, createdAt, chunkCount, and capHit, plus a demo flag for the bundled sample. `chunks` holds id, documentId, text, a heading when the passage has one, the source metadata, and the embedding as a Float32Array (768 numbers for Gemini; longer for the keyword demo). Deleting a document deletes its chunks in the same transaction. The page reads that database on load, so a refresh or a closed tab does not make you upload again. Original files are not kept. Nothing is written to the Worker, and there is no server-side database. If the browser refuses IndexedDB, or a write runs out of space, the page says so and uses memory for that session only.
 
 **The API keys are not in the bundle.** The original AI Studio project injected `GEMINI_API_KEY` with Vite `define`, so a public deploy would have shipped the key. The browser now calls `/api/embed`, `/api/rewrite`, and `/api/generate`. Locally those routes are Vite middleware. In production they are a Worker, and static files are Workers assets. `npm run check:bundle` fails the build if the client output contains either key name or either provider host.
 
@@ -81,7 +81,7 @@ These are the choices in this repo, not a claim about production RAG in general.
 
 **The rate limit is local.** Each route has a sliding window keyed by a hash of the client IP: 40 embed calls, 12 rewrites, and 12 generations per minute. Bodies are capped at 128 KB, embed batches at 16 texts, and answers at 6 passages. On Workers the counters live in one isolate, so this is a demo brake, not an account-wide quota.
 
-**Tests do not call Gemini or Grok.** They cover chunk boundaries, cosine ranking, the document filter, failed and cancelled indexing, citation linking, the prompt text, SSE parsing, and the HTTP limits, including mocked Grok response bodies. `npm run eval:retrieval` repeats the offline ranking checks. If `GEMINI_API_KEY` is set, it also embeds three short passages and expects the plant sentence to rank first for a plant question. That live check is skipped in CI.
+**Tests do not call Gemini or Grok.** They cover chunk boundaries, cosine ranking, the document filter, failed and cancelled indexing, IndexedDB restore, delete cascade, an empty database, quota and unavailable fallbacks, citation linking, the prompt text, SSE parsing, and the HTTP limits, including mocked Grok response bodies. `npm run eval:retrieval` repeats the offline ranking checks. If `GEMINI_API_KEY` is set, it also embeds three short passages and expects the plant sentence to rank first for a plant question. That live check is skipped in CI.
 
 ## Stack
 
@@ -93,6 +93,7 @@ These are the choices in this repo, not a claim about production RAG in general.
 | Embeddings | Gemini `gemini-embedding-2`, 768 dimensions |
 | Answers | xAI `grok-4.7` via chat completions, streamed |
 | Retrieval | In-browser cosine similarity |
+| Library | IndexedDB in the browser (`documents` and `chunks`) |
 | Server | Vite middleware locally, Cloudflare Worker plus static assets in production |
 | Tests | Vitest |
 
@@ -151,7 +152,7 @@ Preview URLs are public unless you add an access policy.
 
 ## Limitations and next steps
 
-- The index is memory in one tab. Refreshing loses it. A durable version would use something like Cloudflare Vectorize or a local database.
+- The library is IndexedDB in this browser profile. It is not synced to other devices. A private window may refuse storage. Clearing site data, or the in-app control, deletes it. Vectors saved in demo mode are keyword vectors; adding a Gemini key later does not re-embed them.
 - There is no shared corpus, so a public demo still asks every visitor to upload files and spend embedding quota.
 - Retrieval is cosine over Gemini embeddings only. There is no lexical search, no reranker, and no measured recall on a public benchmark.
 - The offline eval checks the ranker with hand-built vectors. It does not measure the embedding model. The optional live check is three sentences, not a dataset.

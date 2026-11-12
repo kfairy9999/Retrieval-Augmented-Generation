@@ -7,10 +7,11 @@ import { MessageList } from "./components/MessageList";
 import { Sidebar } from "./components/Sidebar";
 import { SourcePanel } from "./components/SourcePanel";
 import { embedTexts, fetchHealth, historyFromMessages, rewriteQuery, streamAnswer, type Health } from "./lib/api";
+import { documentStore, toUploadedDocument, type StorageMode } from "./lib/documentStore";
 import { chunksForPrompt, indexDocument } from "./lib/ingest";
-import { resolveSearchQuery } from "./lib/resolveQuery";
-import { vectorStore } from "./lib/rag";
 import { keywordVectors, tokenize } from "./lib/keyword";
+import { VectorStore } from "./lib/rag";
+import { resolveSearchQuery } from "./lib/resolveQuery";
 import sampleText from "./samples/how-this-app-works.md?raw";
 import { DocStatus, type Message, type UploadedDocument } from "./types";
 
@@ -40,7 +41,12 @@ export default function App() {
   const [apiDown, setApiDown] = useState(false);
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [activeCitation, setActiveCitation] = useState<number | null>(null);
+  const [libraryReady, setLibraryReady] = useState(false);
+  const [storageMode, setStorageMode] = useState<StorageMode | "loading">("loading");
+  const [storageNotice, setStorageNotice] = useState<string | null>(null);
+  const [canClearDevice, setCanClearDevice] = useState(false);
   const cancelledRef = useRef(new Set<string>());
+  const libraryEpoch = useRef(0);
 
   useEffect(() => {
     void fetchHealth()
@@ -49,6 +55,23 @@ export default function App() {
         setApiDown(false);
       })
       .catch(() => setApiDown(true));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void documentStore.open().then((snapshot) => {
+      if (cancelled) return;
+      const restored = snapshot.documents.map(toUploadedDocument);
+      setDocuments(restored);
+      setSelectedDocIds(restored.map((doc) => doc.id));
+      setStorageMode(snapshot.mode);
+      setStorageNotice(snapshot.notice);
+      setCanClearDevice(documentStore.hasDeviceDatabase);
+      setLibraryReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -70,7 +93,8 @@ export default function App() {
   const embedQuery = (text: string) => (keywordMode ? Promise.resolve(keywordVectors([text])) : embedTexts([text], "query"));
   const focused = messages.find((message) => message.id === focusedId) ?? null;
 
-  const handleUpload = async (files: FileList | File[]) => {
+  const handleUpload = async (files: FileList | File[], options?: { demo?: boolean }) => {
+    if (!libraryReady) return;
     const incoming = Array.from(files);
     if (incoming.length > 10) {
       setNotice("Let's keep it to 10 files at a time.");
@@ -97,6 +121,8 @@ export default function App() {
     }
     setNotice(rejected.length > 0 ? rejected.join(" ") : null);
 
+    const epoch = libraryEpoch.current;
+    const markDemo = options?.demo === true;
     const created: UploadedDocument[] = accepted.map((file) => ({
       id: crypto.randomUUID(),
       name: file.name,
@@ -106,6 +132,7 @@ export default function App() {
       chunkCount: 0,
       progress: 0,
       uploadedAt: new Date(),
+      demo: markDemo && file.name === SAMPLE_NAME,
     }));
     setDocuments((prev) => [...prev, ...created]);
     setSelectedDocIds((prev) => [...prev, ...created.map((doc) => doc.id)]);
@@ -120,23 +147,51 @@ export default function App() {
         if (cancelledRef.current.has(docId)) continue;
         setDocuments((prev) => prev.map((doc) => (doc.id === docId ? { ...doc, status: DocStatus.PROCESSING } : doc)));
 
+        const scratch = new VectorStore();
         const result = await indexDocument(
           text,
           docId,
           file.name,
-          vectorStore,
+          scratch,
           (pieces) => embedDocuments(pieces, file.name),
-          () => cancelledRef.current.has(docId),
+          () => cancelledRef.current.has(docId) || libraryEpoch.current !== epoch,
           (progress) => {
             setDocuments((prev) => prev.map((doc) => (
               doc.id === docId ? { ...doc, status: DocStatus.EMBEDDING, progress } : doc
             )));
           },
         );
-        if (cancelledRef.current.has(docId)) continue;
+        if (cancelledRef.current.has(docId) || libraryEpoch.current !== epoch) continue;
+        const saved = await documentStore.put(
+          {
+            id: docId,
+            name: file.name,
+            type: file.type || "text/plain",
+            size: file.size,
+            createdAt: created[index]?.uploadedAt.getTime() ?? Date.now(),
+            chunkCount: result.chunkCount,
+            capHit: result.truncated,
+            demo: markDemo && file.name === SAMPLE_NAME,
+          },
+          scratch.chunksFor(docId),
+        );
+        if (cancelledRef.current.has(docId) || libraryEpoch.current !== epoch) {
+          await documentStore.delete(docId);
+          continue;
+        }
+        if (saved.notice) setStorageNotice(saved.notice);
+        setStorageMode(documentStore.storageMode);
+        setCanClearDevice(documentStore.hasDeviceDatabase);
         setDocuments((prev) => prev.map((doc) => (
           doc.id === docId
-            ? { ...doc, status: DocStatus.INDEXED, chunkCount: result.chunkCount, progress: 1, truncated: result.truncated }
+            ? {
+                ...doc,
+                status: DocStatus.INDEXED,
+                chunkCount: result.chunkCount,
+                progress: 1,
+                truncated: result.truncated,
+                stored: saved.persisted,
+              }
             : doc
         )));
       } catch (error) {
@@ -151,19 +206,39 @@ export default function App() {
 
   const handleRemove = (id: string) => {
     cancelledRef.current.add(id);
-    vectorStore.removeDoc(id);
     setDocuments((prev) => prev.filter((doc) => doc.id !== id));
     setSelectedDocIds((prev) => prev.filter((docId) => docId !== id));
+    void documentStore.delete(id).then((result) => {
+      if (result.notice) setStorageNotice(result.notice);
+    });
+  };
+
+  const handleClear = () => {
+    libraryEpoch.current += 1;
+    for (const doc of documents) cancelledRef.current.add(doc.id);
+    setDocuments([]);
+    setSelectedDocIds([]);
+    setMessages([]);
+    setFocusedId(null);
+    setActiveCitation(null);
+    setInput("");
+    void documentStore.clear().then((result) => {
+      if (result.notice) setStorageNotice(result.notice);
+    });
   };
 
   const loadSample = () => {
-    if (documents.some((doc) => doc.name === SAMPLE_NAME)) return;
-    void handleUpload([new File([sampleText], SAMPLE_NAME, { type: "text/markdown" })]);
+    if (!libraryReady || documents.some((doc) => doc.name === SAMPLE_NAME)) return;
+    void handleUpload([new File([sampleText], SAMPLE_NAME, { type: "text/markdown" })], { demo: true });
   };
 
   const handleSend = async (preset?: string) => {
     const question = (preset ?? input).trim();
     if (!question || isProcessing) return;
+    if (!libraryReady) {
+      setHint("Still opening documents saved in this browser.");
+      return;
+    }
 
     const readyIds = selectedDocIds.filter((id) => (
       documents.some((doc) => doc.id === id && doc.status === DocStatus.INDEXED)
@@ -208,7 +283,7 @@ export default function App() {
         () => (passagesOnly ? Promise.resolve(question) : rewriteQuery(question, prior)),
       );
       const [queryEmbedding] = await embedQuery(searchQuery);
-      const ranked = vectorStore.search(queryEmbedding, readyIds, TOP_K);
+      const ranked = documentStore.search(queryEmbedding, readyIds, TOP_K);
       // A keyword score of 0 means the passage shares no words with the question.
       const sources = keywordMode ? ranked.filter((source) => source.score > 0) : ranked;
       if (sources.length === 0) {
@@ -276,6 +351,10 @@ export default function App() {
           documents={documents}
           selectedDocIds={selectedDocIds}
           notice={notice}
+          libraryReady={libraryReady}
+          storageMode={storageMode}
+          storageNotice={storageNotice}
+          canClearDevice={canClearDevice}
           onUpload={(files) => void handleUpload(files)}
           onToggleDoc={(id) => {
             setSelectedDocIds((prev) => (prev.includes(id) ? prev.filter((docId) => docId !== id) : [...prev, id]));
@@ -284,6 +363,7 @@ export default function App() {
             setSelectedDocIds((prev) => (prev.length === documents.length ? [] : documents.map((doc) => doc.id)));
           }}
           onRemove={handleRemove}
+          onClear={handleClear}
           onDismissNotice={() => setNotice(null)}
         />
       </div>
@@ -302,10 +382,13 @@ export default function App() {
             <div className="min-w-0">
               <p className="font-serif truncate text-lg text-[#2a211c]">Personal Knowledge Engine</p>
               <p className="text-sm text-[#4e433c]">
-                {indexedCount > 0
-                  ? `Searching ${indexedCount} ${indexedCount === 1 ? "document" : "documents"}`
-                  : "No documents selected yet"}
+                {libraryReady
+                  ? indexedCount > 0
+                    ? `Searching ${indexedCount} ${indexedCount === 1 ? "document" : "documents"}`
+                    : "No documents selected yet"
+                  : "Opening saved documents"}
               </p>
+              <p className="text-sm text-[#4e433c]">{storageLine(storageMode)}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -321,6 +404,11 @@ export default function App() {
         </header>
 
         {(keywordMode || passagesOnly) && <DemoBanner keywordMode={keywordMode} passagesOnly={passagesOnly} />}
+        {storageNotice && (
+          <div role="status" className="border-b border-[#ead3b0] bg-[#fff8ee] px-4 py-2.5 text-sm leading-6 text-[#5a2c14] sm:px-6">
+            {storageNotice}
+          </div>
+        )}
         {messages.length === 0 ? (
           <EmptyState
             onUpload={(files) => void handleUpload(files)}
@@ -328,6 +416,9 @@ export default function App() {
             sampleReady={documents.some((doc) => doc.name === SAMPLE_NAME && doc.status === DocStatus.INDEXED)}
             sampleQuestions={SAMPLE_QUESTIONS}
             onAsk={(question) => void handleSend(question)}
+            libraryReady={libraryReady}
+            persisted={storageMode === "indexeddb"}
+            savedCount={documents.filter((doc) => doc.status === DocStatus.INDEXED).length}
           />
         ) : (
           <MessageList
@@ -411,6 +502,12 @@ function DemoBanner({ keywordMode, passagesOnly }: { keywordMode: boolean; passa
       <span className="font-semibold">Demo mode:</span> {parts.join(" and ")}, until API keys are added on the server.
     </div>
   );
+}
+
+function storageLine(mode: StorageMode | "loading"): string {
+  if (mode === "loading") return "Checking this browser";
+  if (mode === "indexeddb") return "Saved in this browser, kept after a refresh";
+  return "Not saved on this device, this tab only";
 }
 
 function keyStateFrom(health: Health | null, apiDown: boolean): KeyState {

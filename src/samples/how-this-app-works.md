@@ -14,7 +14,7 @@ Every passage becomes a vector. With a Gemini key on the server, the vector come
 
 A question is turned into a vector the same way. The app ranks passages by cosine similarity and keeps the top four. The score shown beside a passage is that similarity. It is not a confidence score.
 
-The vectors live in memory in this browser tab. Nothing is stored on the server, and closing the tab clears the library.
+The vectors live in IndexedDB in this browser, on this device. Nothing is stored on a server. A refresh or a closed tab keeps the library. The sidebar can clear those saved documents from this device.
 
 ## How an answer is written
 
@@ -32,4 +32,4 @@ Each route has a per-visitor rate limit: 40 embedding requests, 12 rewrites, and
 
 ## What this demo does not do
 
-It does not read scanned PDFs, because there is no OCR step. It does not remember documents between visits. It does not search the web. When it is running without keys, it shows the passages it found instead of writing an answer, and it says so on the page.
+It does not read scanned PDFs, because there is no OCR step. It does not sync documents to a server or to another device. It does not search the web. When it is running without keys, it shows the passages it found instead of writing an answer, and it says so on the page.
