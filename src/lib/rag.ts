@@ -126,6 +126,8 @@ export class VectorStore {
   countFor(docId: string): number {
     return this.chunks.filter((chunk) => chunk.docId === docId).length;
   }
-}
 
-export const vectorStore = new VectorStore();
+  chunksFor(docId: string): DocumentChunk[] {
+    return this.chunks.filter((chunk) => chunk.docId === docId);
+  }
+}

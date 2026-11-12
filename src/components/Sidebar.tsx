@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { CHAT_MODEL, EMBEDDING_MODEL } from "../../shared/models";
+import { DEVICE_LIBRARY_NOTE, type StorageMode } from "../lib/documentStore";
 import { DocStatus, type UploadedDocument } from "../types";
 
 interface SidebarProps {
@@ -19,10 +20,15 @@ interface SidebarProps {
   documents: UploadedDocument[];
   selectedDocIds: string[];
   notice: string | null;
+  libraryReady?: boolean;
+  storageMode?: StorageMode | "loading";
+  storageNotice?: string | null;
+  canClearDevice?: boolean;
   onUpload: (files: FileList) => void;
   onToggleDoc: (id: string) => void;
   onToggleAll: () => void;
   onRemove: (id: string) => void;
+  onClear?: () => void;
   onDismissNotice: () => void;
 }
 
@@ -32,15 +38,26 @@ export function Sidebar({
   documents,
   selectedDocIds,
   notice,
+  libraryReady = true,
+  storageMode = "loading",
+  storageNotice = null,
+  canClearDevice = false,
   onUpload,
   onToggleDoc,
   onToggleAll,
   onRemove,
+  onClear,
   onDismissNotice,
 }: SidebarProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [confirmingClear, setConfirmingClear] = useState(false);
   const allSelected = documents.length > 0 && selectedDocIds.length === documents.length;
   const ready = documents.filter((doc) => doc.status === DocStatus.INDEXED).map((doc) => doc.name);
+  const persisted = storageMode === "indexeddb";
+
+  useEffect(() => {
+    if (documents.length === 0) setConfirmingClear(false);
+  }, [documents.length]);
 
   return (
     <aside className="flex h-full w-[min(100vw,20.5rem)] flex-col border-r border-[#eadfd4] bg-[#fffdfb] shadow-xl md:shadow-none">
@@ -51,7 +68,7 @@ export function Sidebar({
           </span>
           <div>
             <h1 className="font-serif text-xl leading-none text-[#2a211c]">Your library</h1>
-            <p className="mt-1 text-sm text-[#4e433c]">Kept in this browser tab</p>
+            <p className="mt-1 text-sm text-[#4e433c]">{librarySubtitle(storageMode)}</p>
           </div>
         </div>
       </div>
@@ -72,7 +89,8 @@ export function Sidebar({
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
-            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-[#8c3a24] px-3 text-sm font-semibold text-white transition hover:bg-[#732f1d]"
+            disabled={!libraryReady}
+            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-[#8c3a24] px-3 text-sm font-semibold text-white transition hover:bg-[#732f1d] disabled:opacity-70"
           >
             <FileUp className="h-4 w-4" aria-hidden="true" />
             Add a document
@@ -108,7 +126,7 @@ export function Sidebar({
           </p>
           {documents.length === 0 && (
             <div className="rounded-3xl border border-dashed border-[#ddcfc2] px-4 py-8 text-center text-sm leading-6 text-[#4e433c]">
-              Nothing here yet. Add a file when you’re ready.
+              {libraryReady ? "Nothing here yet. Add a file when you’re ready." : "Opening documents saved in this browser."}
             </div>
           )}
           <ul className="space-y-3">
@@ -153,6 +171,12 @@ export function Sidebar({
                         </div>
                       )}
                       {doc.error && <p className="mt-2 text-sm leading-6 text-[#7a1f36]">{doc.error}</p>}
+                      {doc.demo && (
+                        <p className="mt-1 text-sm font-medium text-[#8c3a24]">Demo document, not your files</p>
+                      )}
+                      {doc.status === DocStatus.INDEXED && doc.stored === false && (
+                        <p className="mt-1 text-sm text-[#6b3418]">In this tab only</p>
+                      )}
                       {doc.status === DocStatus.INDEXED && (
                         <p className="mt-2 text-sm text-[#4e433c]">
                           {(doc.size / 1024).toFixed(1)} KB · {doc.chunkCount} passages
@@ -177,11 +201,54 @@ export function Sidebar({
       </div>
 
       <div className="border-t border-[#eadfd4] px-5 py-4 text-sm leading-6 text-[#4e433c]">
-        <p>Search · {keywordMode ? "keyword match (demo)" : EMBEDDING_MODEL}</p>
+        <p>{persisted ? DEVICE_LIBRARY_NOTE : storageNotice ?? "Checking for documents saved in this browser."}</p>
+        {libraryReady && documents.length > 0 && onClear && (
+          confirmingClear ? (
+            <div className="mt-3 rounded-2xl border border-[#eadfd4] bg-[#fff6ea] px-3 py-3" role="group" aria-label="Clear saved documents">
+              <p className="text-sm leading-6 text-[#2a211c]">
+                {canClearDevice
+                  ? "Remove every document saved in this browser? This device will forget them."
+                  : "Remove the documents in this tab?"}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmingClear(false);
+                  onClear();
+                }}
+                className="mt-2 flex min-h-11 w-full items-center justify-center rounded-full bg-[#7a1f36] px-3 text-sm font-semibold text-white"
+              >
+                Remove them
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmingClear(false)}
+                className="mt-2 flex min-h-11 w-full items-center justify-center rounded-full border border-[#e4d8cc] bg-white px-3 text-sm font-semibold text-[#2a211c]"
+              >
+                Keep them
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmingClear(true)}
+              className="mt-3 flex min-h-11 w-full items-center justify-center rounded-full border border-[#e4d8cc] bg-white px-3 text-sm font-semibold text-[#2a211c] hover:bg-[#f6eee7]"
+            >
+              {canClearDevice ? "Clear documents on this device" : "Clear documents in this tab"}
+            </button>
+          )
+        )}
+        <p className="mt-3">Search · {keywordMode ? "keyword match (demo)" : EMBEDDING_MODEL}</p>
         <p>Answers · {passagesOnly ? "passages only (demo)" : CHAT_MODEL}</p>
       </div>
     </aside>
   );
+}
+
+function librarySubtitle(mode: StorageMode | "loading"): string {
+  if (mode === "indexeddb") return "Saved on this device";
+  if (mode === "memory") return "This tab only";
+  return "Opening this device";
 }
 
 function labelFor(doc: UploadedDocument): string {
